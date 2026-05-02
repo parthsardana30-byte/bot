@@ -1,32 +1,25 @@
 import asyncio
-
-# SABSE PEHLE YEH LINE AAYEGI (Imports se bhi pehle!)
-asyncio.set_event_loop(asyncio.new_event_loop()) 
-
+asyncio.set_event_loop(asyncio.new_event_loop())
 import os
 import time
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
 import requests
-from web_server import keep_alive
+from web_server import keep_alive  
 
-# Windows par testing ke liye zaroori loop fix
-asyncio.set_event_loop(asyncio.new_event_loop())
 
-# --- SECURE CONFIGURATION (Render Environment Variables se aayega) ---
+
 API_ID = os.environ.get("API_ID")
 API_HASH = os.environ.get("API_HASH")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-ADMIN_ID = int(os.environ.get("ADMIN_ID", 0)) # Aapka Telegram User ID
+ADMIN_ID = int(os.environ.get("ADMIN_ID", 0)) 
 
 CASHFREE_APP_ID = os.environ.get("CASHFREE_APP_ID")
 CASHFREE_SECRET_KEY = os.environ.get("CASHFREE_SECRET_KEY")
-CASHFREE_ENV = os.environ.get("CASHFREE_ENV", "SANDBOX") # "PRODUCTION" for live
+CASHFREE_ENV = os.environ.get("CASHFREE_ENV", "SANDBOX") 
 
-# Initialize Bot
 app = Client("premium_channel_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# --- DATABASE ---
 db = {
     "price": 499,
     "welcome_msg": "Welcome! Choose an option below to get started.",
@@ -35,10 +28,9 @@ db = {
     "premium_link": "https://t.me/+your_private_invite_link"
 }
 
-# --- CASHFREE PAYMENT LINK GENERATOR ---
-def create_cashfree_link(user_id, amount):
-    # Telegram Buttons ke liye 'Payment Links API' best hoti hai
-    url = "https://sandbox.cashfree.com/pg/links" if CASHFREE_ENV == "SANDBOX" else "https://api.cashfree.com/pg/links"
+def create_cashfree_order(user_id, amount):
+    # Ab hum Orders API use kar rahe hain jo by default enabled hoti hai
+    url = "https://sandbox.cashfree.com/pg/orders" if CASHFREE_ENV == "SANDBOX" else "https://api.cashfree.com/pg/orders"
     
     headers = {
         "accept": "application/json",
@@ -48,21 +40,32 @@ def create_cashfree_link(user_id, amount):
         "content-type": "application/json"
     }
     
+    order_id = f"order_{user_id}_{int(time.time())}"
+    
     payload = {
-        "link_id": f"pay_{user_id}_{int(time.time())}",
-        "link_amount": amount,
-        "link_currency": "INR",
-        "link_purpose": "Premium Channel Access",
         "customer_details": {
-            "customer_phone": "9999999999", # Required by Cashfree
+            "customer_id": str(user_id),
+            "customer_phone": "9999999999", 
             "customer_name": f"User_{user_id}"
-        }
+        },
+        "order_amount": amount,
+        "order_currency": "INR",
+        "order_id": order_id
     }
     
     try:
         response = requests.post(url, json=payload, headers=headers)
         if response.status_code == 200:
-            return response.json().get("link_url") # Yeh direct payment link dega
+            session_id = response.json().get("payment_session_id")
+            
+            # Render automatically web URL de deta hai
+            base_url = os.environ.get("RENDER_EXTERNAL_URL")
+            
+            # Agar kisi wajah se render ka URL miss ho jaye toh manual fallback
+            if not base_url:
+                base_url = "https://bot-k41g.onrender.com" # Aapke screenshot wala URL
+                
+            return f"{base_url}/checkout/{session_id}"
         else:
             print(f"Cashfree Error: {response.text}")
             return None
@@ -70,7 +73,6 @@ def create_cashfree_link(user_id, amount):
         print(f"Error: {e}")
         return None
 
-# --- BOT HANDLERS ---
 @app.on_message(filters.command("start") & filters.private)
 async def start_command(client: Client, message: Message):
     keyboard = InlineKeyboardMarkup([
@@ -85,18 +87,16 @@ async def start_command(client: Client, message: Message):
 
 @app.on_callback_query(filters.regex("buy_premium"))
 async def handle_buy(client: Client, callback_query):
-    await callback_query.answer("Generating secure payment link...", show_alert=False)
+    await callback_query.answer("Setting up secure checkout...", show_alert=False)
     
-    # Generate Link
-    payment_link = create_cashfree_link(callback_query.from_user.id, db["price"])
+    payment_url = create_cashfree_order(callback_query.from_user.id, db["price"])
     
-    if payment_link:
-        pay_kbd = InlineKeyboardMarkup([[InlineKeyboardButton("Pay Now", url=payment_link)]])
-        await callback_query.message.reply_text("Click below to complete your payment securely via Cashfree:", reply_markup=pay_kbd)
+    if payment_url:
+        pay_kbd = InlineKeyboardMarkup([[InlineKeyboardButton("Proceed to Payment", url=payment_url)]])
+        await callback_query.message.reply_text("Your secure checkout page is ready. Click below to pay:", reply_markup=pay_kbd)
     else:
-        await callback_query.message.reply_text("Server error! Could not generate payment link right now. Please tell admin.")
+        await callback_query.message.reply_text("Server error! Could not create order right now. Please tell admin.")
 
-# --- ADMIN COMMANDS ---
 @app.on_message(filters.command("setprice") & filters.user(ADMIN_ID))
 async def set_price(client, message):
     try:
@@ -113,9 +113,6 @@ async def set_msg(client, message):
     await message.reply_text("✅ Welcome message updated.")
 
 if __name__ == "__main__":
-    # Pehle Flask Web Server start karein (Render ke liye zaroori)
     keep_alive()
-    
-    # Phir Telegram Bot start karein
-    print("Starting Telegram Bot...")
+    print("Starting Telegram Bot with Custom Web Checkout...")
     app.run()
