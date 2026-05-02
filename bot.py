@@ -1,10 +1,14 @@
 import asyncio
+
+# SABSE PEHLE YEH LINE AAYEGI (Imports se bhi pehle!)
+asyncio.set_event_loop(asyncio.new_event_loop()) 
+
 import os
 import time
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
 import requests
-from web_server import keep_alive  # Flask server ko import kiya
+from web_server import keep_alive
 
 # Windows par testing ke liye zaroori loop fix
 asyncio.set_event_loop(asyncio.new_event_loop())
