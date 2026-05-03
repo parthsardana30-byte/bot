@@ -5,44 +5,19 @@ import requests
 
 app = Flask(__name__)
 
-# --- WEBHOOK SETTINGS ---
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-
-# Yahan ek khali DB banayenge jise bot.py aakar update karega
-db = {} 
-
 @app.route('/')
 def home():
-    return "Telegram Bot is running on Render!"
+    return "Web Server is Active!"
 
 @app.route('/checkout/<session_id>')
 def checkout(session_id):
     env_mode = os.environ.get("CASHFREE_ENV", "SANDBOX").lower()
     html_page = """
     <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Premium Access Checkout</title>
-        <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
-        <style>
-            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #f0f2f5; margin: 0; }
-            .card { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-align: center; max-width: 400px; width: 90%; }
-            .logo { font-size: 40px; margin-bottom: 10px; }
-            h2 { color: #333; margin-bottom: 10px; }
-            p { color: #666; margin-bottom: 25px; line-height: 1.5; }
-            button { background: #0088cc; color: white; border: none; padding: 14px 28px; border-radius: 6px; font-size: 16px; font-weight: bold; cursor: pointer; width: 100%; transition: background 0.3s; }
-            button:hover { background: #0077b3; }
-        </style>
-    </head>
-    <body>
-        <div class="card">
-            <div class="logo">💎</div>
-            <h2>Complete Payment</h2>
-            <p>Click the button below to securely process your payment via Cashfree and unlock premium access.</p>
-            <button id="payBtn">Pay Now</button>
-        </div>
+    <html>
+    <head><meta name="viewport" content="width=device-width, initial-scale=1.0"><script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script></head>
+    <body style="display:flex; justify-content:center; align-items:center; height:100vh; background:#f0f2f5;">
+        <button id="payBtn" style="padding:15px 30px; background:#0088cc; color:white; border:none; border-radius:8px; font-size:18px; font-weight:bold; cursor:pointer;">Pay Now</button>
         <script>
             const cashfree = Cashfree({ mode: "{{ env_mode }}" });
             document.getElementById('payBtn').addEventListener('click', () => {
@@ -58,30 +33,42 @@ def checkout(session_id):
 def webhook():
     try:
         data = request.json
-        if data and data.get("data") and data["data"]["order"].get("order_status") == "PAID":
-            
+        print("====== WEBHOOK RECEIVED ======")
+        print(data)
+        
+        # Cashfree se success signal check karna
+        is_success = False
+        if data and data.get("type") == "PAYMENT_SUCCESS_WEBHOOK":
+            is_success = True
+        elif data and data.get("data", {}).get("order", {}).get("order_status") == "PAID":
+            is_success = True
+
+        if is_success:
+            # Order ID se User ID nikalna
             order_id = data["data"]["order"]["order_id"]
             user_id = order_id.split('_')[1] 
             
-            # Ab yeh link DB se uthayega jo aapne bot mein set ki hogi!
-            premium_link = db.get("premium_link", "Link not updated yet. Please contact admin.")
+            # Seedha Render ke Dashboard se link uthayega
+            premium_link = os.environ.get("PREMIUM_LINK", "Link not found. Please contact Admin.")
+            bot_token = os.environ.get("BOT_TOKEN")
             
-            msg_text = f"✅ Payment Successful! Thank you for purchasing.\n\nHere is your exclusive premium channel link. Please join fast:\n{premium_link}"
+            msg_text = f"✅ **Payment Successful!**\n\nThank you for upgrading. Here is your private channel link:\n{premium_link}"
+            tg_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
             
-            tg_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-            requests.post(tg_url, json={"chat_id": user_id, "text": msg_text})
-            
-            return "Success", 200
+            # Telegram API ko message bhejna
+            response = requests.post(tg_url, json={"chat_id": user_id, "text": msg_text})
+            print("Telegram API Status:", response.status_code)
+            print("Telegram API Response:", response.text)
+        else:
+            print("Payment not successful yet or different webhook type.")
             
     except Exception as e:
-        print(f"Webhook error: {e}")
+        print(f"CRITICAL WEBHOOK ERROR: {e}")
         
-    return "Event received", 200
+    return "OK", 200
 
 def run_server():
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
 
 def keep_alive():
-    t = threading.Thread(target=run_server)
-    t.start()
+    threading.Thread(target=run_server).start()
