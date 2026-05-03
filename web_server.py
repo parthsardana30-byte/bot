@@ -2,12 +2,28 @@ from flask import Flask, render_template_string, request
 import threading
 import os
 import requests
+import json
 
 app = Flask(__name__)
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+ADMIN_ID = os.environ.get("ADMIN_ID") 
+
+# Absolute path for JSON taaki Render/VPS dono jagah kaam kare
+DB_FILE = os.path.join(os.getcwd(), "bot_data.json")
+
+def get_premium_link():
+    try:
+        if os.path.exists(DB_FILE):
+            with open(DB_FILE, "r") as f:
+                data = json.load(f)
+                return data.get("premium_link")
+    except Exception as e:
+        print(f"File Error: {e}")
+    return None
 
 @app.route('/')
 def home():
-    return "Web Server is Active!"
+    return "Web Server Active!"
 
 @app.route('/checkout/<session_id>')
 def checkout(session_id):
@@ -34,9 +50,7 @@ def webhook():
     try:
         data = request.json
         print("====== WEBHOOK RECEIVED ======")
-        print(data)
         
-        # Cashfree se success signal check karna
         is_success = False
         if data and data.get("type") == "PAYMENT_SUCCESS_WEBHOOK":
             is_success = True
@@ -44,26 +58,34 @@ def webhook():
             is_success = True
 
         if is_success:
-            # Order ID se User ID nikalna
             order_id = data["data"]["order"]["order_id"]
             user_id = order_id.split('_')[1] 
             
-            # Seedha Render ke Dashboard se link uthayega
-            premium_link = os.environ.get("PREMIUM_LINK", "Link not found. Please contact Admin.")
-            bot_token = os.environ.get("BOT_TOKEN")
+            premium_link = get_premium_link()
+            tg_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
             
-            msg_text = f"✅ **Payment Successful!**\n\nThank you for upgrading. Here is your private channel link:\n{premium_link}"
-            tg_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-            
-            # Telegram API ko message bhejna
-            response = requests.post(tg_url, json={"chat_id": user_id, "text": msg_text})
-            print("Telegram API Status:", response.status_code)
-            print("Telegram API Response:", response.text)
-        else:
-            print("Payment not successful yet or different webhook type.")
+            if premium_link:
+                # 1. User ko link bhejo
+                msg_text = f"✅ **Payment Successful!**\n\nWelcome to Premium. Join our private channel here:\n{premium_link}"
+                requests.post(tg_url, json={"chat_id": user_id, "text": msg_text})
+                
+                # 2. Admin ko alert karo
+                if ADMIN_ID:
+                    admin_msg = f"💰 **Payment Received!**\nUser ID: `{user_id}` ne abhi premium kharida hai."
+                    requests.post(tg_url, json={"chat_id": ADMIN_ID, "text": admin_msg})
+            else:
+                # Agar kisi wajah se link set nahi hua, toh backup plan!
+                fallback_msg = "⚠️ Your payment was successful! However, the automated link is not ready. The Admin has been notified and will send you the link shortly."
+                requests.post(tg_url, json={"chat_id": user_id, "text": fallback_msg})
+                
+                if ADMIN_ID:
+                    admin_alert = f"🚨 **URGENT:** User `{user_id}` ne payment kar di hai, lekin aapne `/setlink` nahi lagaya tha! Unko turant manual link bhejo."
+                    requests.post(tg_url, json={"chat_id": ADMIN_ID, "text": admin_alert})
+
+            return "Success", 200
             
     except Exception as e:
-        print(f"CRITICAL WEBHOOK ERROR: {e}")
+        print(f"WEBHOOK ERROR: {e}")
         
     return "OK", 200
 
